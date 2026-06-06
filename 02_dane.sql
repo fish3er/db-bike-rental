@@ -1,43 +1,8 @@
--- ============================================================================
---  System wypożyczalni rowerów miejskich
---  Skrypt 02 - Dane testowe (DML / INSERT)   [wersja rozbudowana]
---
---  Wypełnia bazę spójnym, realistycznym zestawem danych z bogatą historią
---  wypożyczeń, dzięki czemu statystyki, rankingi i podzapytania zwracają
---  zróżnicowane, czytelne wyniki.
---
---  Zawartość:
---    - 3 taryfy
---    - 8 klientów (1 zablokowany, 1 z zaległością)
---    - 4 stacje z dokami (26 doków)
---    - 12 rowerów (7 dostępnych w dokach, 2 wypożyczone, 3 w serwisie)
---    - 4 pracowników
---    - 20 wypożyczeń (18 zakończonych + 2 aktywne)
---    - 18 płatności (17 opłaconych + 1 zaległa)
---    - 3 zgłoszenia serwisowe
---
---  Rozkład wypożyczeń na klienta (dla ciekawszych statystyk):
---    Jan(1)=5, Anna(2)=4, Piotr(3)=3, Krzysztof(5)=3, Maria(4)=2(+1 akt.),
---    Tomasz(8)=1, Agnieszka(6)=0, Zofia(7)=0.
---
---  Stany rowerów i doków są wzajemnie spójne (reguły RB1, RB2, RB7).
---  Bieżące rozmieszczenie rowerów odzwierciedla TYLKO aktywne wypożyczenia
---  i serwis; zakończona historia nie wpływa na aktualne zadokowanie.
---
---  Uruchamiać PO skrypcie 01_ddl.sql, na czystym schemacie.
--- ============================================================================
-
--- ---------------------------------------------------------------------------
---  TARYFY
--- ---------------------------------------------------------------------------
 INSERT INTO taryfa (nazwa, oplata_poczatkowa, stawka_minuta) VALUES
     ('Standard',  2.00, 0.50),   -- id 1
     ('Student',   1.00, 0.30),   -- id 2
     ('Abonament', 0.00, 0.20);   -- id 3
 
--- ---------------------------------------------------------------------------
---  KLIENCI
--- ---------------------------------------------------------------------------
 INSERT INTO klient (email, imie, nazwisko, id_taryfa, zablokowany) VALUES
     ('jan.kowalski@example.com',       'Jan',      'Kowalski',     1, FALSE),  -- id 1
     ('anna.nowak@example.com',         'Anna',     'Nowak',        2, FALSE),  -- id 2
@@ -48,21 +13,12 @@ INSERT INTO klient (email, imie, nazwisko, id_taryfa, zablokowany) VALUES
     ('zofia.lewandowska@example.com',  'Zofia',    'Lewandowska',  1, TRUE),   -- id 7 (zablokowana)
     ('tomasz.zielinski@example.com',   'Tomasz',   'Zieliński',    2, FALSE);  -- id 8 (zaległość)
 
--- ---------------------------------------------------------------------------
---  STACJE
--- ---------------------------------------------------------------------------
 INSERT INTO stacja (nazwa, pojemnosc, szer_geo, dlug_geo) VALUES
     ('Centrum - Metro Centrum',    8, 52.229676, 21.012229),  -- id 1
     ('Mokotów - Pole Mokotowskie', 6, 52.211100, 21.000000),  -- id 2
     ('Wola - Rondo Daszyńskiego',  6, 52.231900, 20.984700),  -- id 3
     ('Praga - ZOO',                6, 52.255900, 21.027500);  -- id 4
 
--- ---------------------------------------------------------------------------
---  ROWERY
---    dostepny     -> 1-7   (zadokowane)
---    wypozyczony  -> 8-9   (aktywne wypożyczenia, w trasie)
---    serwis       -> 10-12 (w naprawie, poza dokami)
--- ---------------------------------------------------------------------------
 INSERT INTO rower (nr_seryjny, status, przebieg_km) VALUES
     ('RW-0001', 'dostepny',     320),  -- id 1
     ('RW-0002', 'dostepny',     540),  -- id 2
@@ -77,9 +33,6 @@ INSERT INTO rower (nr_seryjny, status, przebieg_km) VALUES
     ('RW-0011', 'serwis',       430),  -- id 11
     ('RW-0012', 'serwis',      1020);  -- id 12
 
--- ---------------------------------------------------------------------------
---  DOKI  (rowery dostępne 1-7 zadokowane; 8-12 poza dokami)
--- ---------------------------------------------------------------------------
 INSERT INTO dok (id_stacja, id_rower, status) VALUES
     (1, 1, 'zajety'), (1, 2, 'zajety'), (1, 3, 'zajety'), (1, 4, 'zajety'),
     (1, NULL, 'wolny'), (1, NULL, 'wolny'), (1, NULL, 'wolny'), (1, NULL, 'wolny');
@@ -93,18 +46,12 @@ INSERT INTO dok (id_stacja, id_rower, status) VALUES
     (4, NULL, 'wolny'), (4, NULL, 'wolny'), (4, NULL, 'wolny'),
     (4, NULL, 'wolny'), (4, NULL, 'wolny'), (4, NULL, 'wolny');
 
--- ---------------------------------------------------------------------------
---  PRACOWNICY
--- ---------------------------------------------------------------------------
 INSERT INTO pracownik (imie, nazwisko, rola) VALUES
     ('Marek',  'Serwisant',    'technik'),        -- id 1
     ('Ewa',    'Kowalczyk',    'technik'),        -- id 2
     ('Robert', 'Operator',     'koordynator'),    -- id 3
     ('Halina', 'Administrator','administrator');  -- id 4
 
--- ---------------------------------------------------------------------------
---  WYPOŻYCZENIA  (18 zakończonych: id 1-18, + 2 aktywne: id 19-20)
--- ---------------------------------------------------------------------------
 INSERT INTO wypozyczenie
     (id_klient, id_rower, id_stacja_start, id_stacja_koniec, czas_start, czas_koniec) VALUES
     -- Jan (1) - Standard
@@ -135,9 +82,6 @@ INSERT INTO wypozyczenie
     (4, 8, 1, NULL, '2025-05-20 10:00', NULL),
     (5, 9, 2, NULL, '2025-05-20 11:30', NULL);
 
--- ---------------------------------------------------------------------------
---  PŁATNOŚCI  (17 opłaconych + 1 zaległa)
--- ---------------------------------------------------------------------------
 INSERT INTO platnosc (id_klient, id_wypozyczenie, kwota, status, czas) VALUES
     (1,  1, 12.00, 'oplacona', '2025-05-01 08:20'),
     (1,  2, 17.00, 'oplacona', '2025-05-03 18:00'),
@@ -158,14 +102,7 @@ INSERT INTO platnosc (id_klient, id_wypozyczenie, kwota, status, czas) VALUES
     (4, 17,  7.00, 'oplacona', '2025-05-14 10:35'),
     (8, 18,  4.60, 'zalegla',  '2025-05-04 09:12');
 
--- ---------------------------------------------------------------------------
---  SERWIS  (rowery 10, 11, 12)
--- ---------------------------------------------------------------------------
 INSERT INTO serwis (id_rower, id_pracownik, opis, data_zgloszenia) VALUES
     (10, 1,    'Uszkodzony hamulec tylny, wymiana klocków.',     '2025-05-15 14:00'),
     (11, 2,    'Przebita opona przednia, łatanie dętki.',        '2025-05-18 10:30'),
     (12, NULL, 'Zgłoszenie zgrzytu w przerzutce - do diagnozy.', '2025-05-21 16:45');
-
--- ============================================================================
---  Koniec danych testowych (wersja rozbudowana).
--- ============================================================================

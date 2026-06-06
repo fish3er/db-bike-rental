@@ -1,13 +1,3 @@
--- ============================================================================
---  System wypożyczalni rowerów miejskich
---  Skrypt 01 - DDL (Data Definition Language)
---  System zarządzania bazą danych: PostgreSQL
---
---  Tworzy pełny schemat bazy: tabele, ograniczenia integralnościowe oraz indeksy.
---  Schemat zgodny z 3NF. Kolejność tworzenia tabel uwzględnia zależności
---  kluczy obcych.
--- ============================================================================
-
 -- Czyszczenie schematu przy ponownym uruchomieniu (kolejność odwrotna do zależności).
 DROP TABLE IF EXISTS serwis        CASCADE;
 DROP TABLE IF EXISTS platnosc      CASCADE;
@@ -19,11 +9,6 @@ DROP TABLE IF EXISTS klient        CASCADE;
 DROP TABLE IF EXISTS taryfa        CASCADE;
 DROP TABLE IF EXISTS pracownik     CASCADE;
 
--- ----------------------------------------------------------------------------
---  Tabela: taryfa
---  Cennik. Wydzielona osobno, aby uniknąć zależności przechodniej w tabeli
---  klient (id_klient -> nazwa_taryfy -> stawka). Zapewnia zgodność z 3NF.
--- ----------------------------------------------------------------------------
 CREATE TABLE taryfa (
     id_taryfa          SERIAL        PRIMARY KEY,
     nazwa              VARCHAR(50)   NOT NULL UNIQUE,
@@ -36,10 +21,6 @@ CREATE TABLE taryfa (
 COMMENT ON TABLE  taryfa IS 'Cennik: opłata początkowa i stawka za minutę wypożyczenia.';
 COMMENT ON COLUMN taryfa.stawka_minuta IS 'Stawka naliczana za każdą rozpoczętą minutę.';
 
--- ----------------------------------------------------------------------------
---  Tabela: klient
---  Użytkownik wypożyczający rowery. Wskazuje taryfę przez klucz obcy.
--- ----------------------------------------------------------------------------
 CREATE TABLE klient (
     id_klient    SERIAL        PRIMARY KEY,
     email        VARCHAR(120)  NOT NULL UNIQUE,
@@ -54,10 +35,6 @@ CREATE TABLE klient (
 COMMENT ON TABLE  klient IS 'Klienci wypożyczalni wraz z przypisaną taryfą.';
 COMMENT ON COLUMN klient.zablokowany IS 'TRUE blokuje możliwość wypożyczenia (np. zaległości).';
 
--- ----------------------------------------------------------------------------
---  Tabela: stacja
---  Fizyczna lokalizacja z określoną pojemnością i współrzędnymi.
--- ----------------------------------------------------------------------------
 CREATE TABLE stacja (
     id_stacja  SERIAL         PRIMARY KEY,
     nazwa      VARCHAR(100)   NOT NULL,
@@ -71,10 +48,6 @@ CREATE TABLE stacja (
 
 COMMENT ON TABLE stacja IS 'Stacje dokujące w sieci wypożyczalni.';
 
--- ----------------------------------------------------------------------------
---  Tabela: rower
---  Pojazd udostępniany klientom. Status kontrolowany słownikowym CHECK.
--- ----------------------------------------------------------------------------
 CREATE TABLE rower (
     id_rower     SERIAL       PRIMARY KEY,
     nr_seryjny   VARCHAR(40)  NOT NULL UNIQUE,
@@ -88,12 +61,6 @@ CREATE TABLE rower (
 COMMENT ON TABLE  rower IS 'Flota rowerów wraz ze stanem i przebiegiem.';
 COMMENT ON COLUMN rower.status IS 'Stan roweru: dostepny / wypozyczony / serwis (reguła RB1).';
 
--- ----------------------------------------------------------------------------
---  Tabela: dok
---  Pojedyncze stanowisko dokujące. Mieści co najwyżej jeden rower.
---  UNIQUE na id_rower wymusza, że rower nie jest zadokowany w dwóch miejscach
---  jednocześnie (reguła RB2). NULL oznacza dok pusty.
--- ----------------------------------------------------------------------------
 CREATE TABLE dok (
     id_dok     SERIAL       PRIMARY KEY,
     id_stacja  INTEGER      NOT NULL
@@ -102,7 +69,7 @@ CREATE TABLE dok (
                REFERENCES rower(id_rower) ON UPDATE CASCADE ON DELETE SET NULL,
     status     VARCHAR(20)  NOT NULL DEFAULT 'wolny'
                CONSTRAINT chk_dok_status CHECK (status IN ('wolny', 'zajety')),
-    -- Spójność: dok zajęty <=> przypisany rower; dok wolny <=> brak roweru.
+    -- dok zajęty <=> przypisany rower; dok wolny <=> brak roweru.
     CONSTRAINT chk_dok_spojnosc CHECK (
         (status = 'zajety' AND id_rower IS NOT NULL) OR
         (status = 'wolny'  AND id_rower IS NULL)
@@ -112,11 +79,6 @@ CREATE TABLE dok (
 COMMENT ON TABLE  dok IS 'Stanowiska dokujące w obrębie stacji (RB2).';
 COMMENT ON COLUMN dok.id_rower IS 'Rower aktualnie zadokowany; NULL = dok pusty. UNIQUE wymusza RB2.';
 
--- ----------------------------------------------------------------------------
---  Tabela: wypozyczenie
---  Zdarzenie wypożyczenia. Dwie stacje: startowa i (opcjonalnie) zwrotu,
---  co umożliwia wypożyczenia jednokierunkowe.
--- ----------------------------------------------------------------------------
 CREATE TABLE wypozyczenie (
     id_wypozyczenie   SERIAL      PRIMARY KEY,
     id_klient         INTEGER     NOT NULL
@@ -135,11 +97,6 @@ CREATE TABLE wypozyczenie (
 COMMENT ON TABLE  wypozyczenie IS 'Wypożyczenia rowerów; zwrot możliwy na innej stacji.';
 COMMENT ON COLUMN wypozyczenie.czas_koniec IS 'NULL = wypożyczenie aktywne (rower w trasie).';
 
--- ----------------------------------------------------------------------------
---  Tabela: platnosc
---  Rozliczenie finansowe. Powiązana z klientem oraz (opcjonalnie) z
---  konkretnym wypożyczeniem.
--- ----------------------------------------------------------------------------
 CREATE TABLE platnosc (
     id_platnosc      SERIAL       PRIMARY KEY,
     id_klient        INTEGER      NOT NULL
@@ -156,10 +113,6 @@ CREATE TABLE platnosc (
 COMMENT ON TABLE  platnosc IS 'Płatności klientów za wypożyczenia.';
 COMMENT ON COLUMN platnosc.status IS 'oplacona / zalegla — zaległa blokuje wypożyczenia (RB5).';
 
--- ----------------------------------------------------------------------------
---  Tabela: pracownik
---  Osoba obsługująca zgłoszenia serwisowe.
--- ----------------------------------------------------------------------------
 CREATE TABLE pracownik (
     id_pracownik  SERIAL       PRIMARY KEY,
     imie          VARCHAR(50)  NOT NULL,
@@ -169,10 +122,6 @@ CREATE TABLE pracownik (
 
 COMMENT ON TABLE pracownik IS 'Pracownicy obsługujący serwis floty.';
 
--- ----------------------------------------------------------------------------
---  Tabela: serwis
---  Zgłoszenie i ewidencja naprawy roweru.
--- ----------------------------------------------------------------------------
 CREATE TABLE serwis (
     id_serwis        SERIAL      PRIMARY KEY,
     id_rower         INTEGER     NOT NULL
@@ -186,30 +135,21 @@ CREATE TABLE serwis (
 COMMENT ON TABLE  serwis IS 'Zgłoszenia serwisowe rowerów.';
 COMMENT ON COLUMN serwis.id_pracownik IS 'NULL = zgłoszenie nieprzypisane do pracownika.';
 
--- ============================================================================
---  INDEKSY
---  Poza indeksami automatycznymi dla PRIMARY KEY i UNIQUE tworzymy indeksy
---  wspierające najczęstsze zapytania (zgodnie z sekcją 5.9 dokumentacji).
--- ============================================================================
-
--- Historia wypożyczeń klienta.
+-- historia wypozyczen klienta
 CREATE INDEX idx_wyp_klient        ON wypozyczenie (id_klient);
 
--- Wypożyczenia danego roweru.
+-- wypozyczenia danego roweru.
 CREATE INDEX idx_wyp_rower         ON wypozyczenie (id_rower);
 
--- Aktywne wypożyczenia (czas_koniec IS NULL) - indeks częściowy.
+-- aktywne wypozyczenia
 CREATE INDEX idx_wyp_aktywne       ON wypozyczenie (id_rower) WHERE czas_koniec IS NULL;
 
--- Zliczanie wolnych/zajętych doków na stacji.
+-- zliczanie wolnych/zajetych dokow na stacji
 CREATE INDEX idx_dok_stacja        ON dok (id_stacja);
 
--- Wykrywanie klientów z zaległościami (RB5).
+-- wykrywanie klientow z zaleglosciami (RB5)
 CREATE INDEX idx_platnosc_zalegla  ON platnosc (id_klient, status);
 
--- Zgłoszenia serwisowe danego roweru.
+-- zgloszenia serwisowe danego roweru
 CREATE INDEX idx_serwis_rower      ON serwis (id_rower);
 
--- ============================================================================
---  Koniec skryptu DDL.
--- ============================================================================

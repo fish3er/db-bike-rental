@@ -1,24 +1,3 @@
--- ============================================================================
---  System wypożyczalni rowerów miejskich
---  Skrypt 03 - Widoki i zaawansowane zapytania SQL
---
---  Pokrywa wymagania na ocenę 3.5-4.0:
---    - widoki (VIEW)
---    - podzapytania (w tym skorelowane)
---    - agregacje, GROUP BY / HAVING
---    - złączenia wielotabelowe, LEFT JOIN
---    - funkcje okna (window functions)
---
---  Uruchamiać PO 01_ddl.sql i 02_dane.sql.
--- ============================================================================
-
--- ############################################################################
---  CZĘŚĆ A: WIDOKI
--- ############################################################################
-
--- ----------------------------------------------------------------------------
---  Widok 1: dostepnosc_stacji
--- ----------------------------------------------------------------------------
 DROP VIEW IF EXISTS dostepnosc_stacji CASCADE;
 CREATE VIEW dostepnosc_stacji AS
 SELECT
@@ -36,9 +15,6 @@ ORDER BY s.id_stacja;
 COMMENT ON VIEW dostepnosc_stacji IS
     'Liczba dostępnych rowerów i wolnych doków na stację wraz z procentem zapełnienia.';
 
--- ----------------------------------------------------------------------------
---  Widok 2: historia_wypozyczen
--- ----------------------------------------------------------------------------
 DROP VIEW IF EXISTS historia_wypozyczen CASCADE;
 CREATE VIEW historia_wypozyczen AS
 SELECT
@@ -63,9 +39,6 @@ LEFT JOIN stacja sk ON sk.id_stacja = w.id_stacja_koniec;
 COMMENT ON VIEW historia_wypozyczen IS
     'Wypożyczenia z czytelnymi danymi i wyliczonym czasem trwania w minutach.';
 
--- ----------------------------------------------------------------------------
---  Widok 3: rozliczenia_klientow
--- ----------------------------------------------------------------------------
 DROP VIEW IF EXISTS rozliczenia_klientow CASCADE;
 CREATE VIEW rozliczenia_klientow AS
 SELECT
@@ -94,9 +67,6 @@ ORDER BY k.id_klient;
 COMMENT ON VIEW rozliczenia_klientow IS
     'Podsumowanie finansowe klientów: liczba wypożyczeń oraz kwoty opłacone i zaległe.';
 
--- ----------------------------------------------------------------------------
---  Widok 4: rowery_do_serwisu
--- ----------------------------------------------------------------------------
 DROP VIEW IF EXISTS rowery_do_serwisu CASCADE;
 CREATE VIEW rowery_do_serwisu AS
 SELECT
@@ -115,12 +85,7 @@ ORDER BY s.data_zgloszenia;
 COMMENT ON VIEW rowery_do_serwisu IS
     'Rowery o statusie serwis wraz ze zgłoszeniami i przypisanymi pracownikami.';
 
-
--- ############################################################################
---  CZĘŚĆ B: ZAAWANSOWANE ZAPYTANIA
--- ############################################################################
-
--- Z1: klienci powyżej średniej liczby wypożyczeń
+-- klienci powyzej sredniej liczby wypozyczen
 SELECT k.imie || ' ' || k.nazwisko AS klient, count(*) AS wypozyczen
 FROM wypozyczenie w
 JOIN klient k ON k.id_klient = w.id_klient
@@ -131,7 +96,7 @@ HAVING count(*) > (
 )
 ORDER BY wypozyczen DESC;
 
--- Z2: popularność stacji startowych
+--popularnosc stacji startowych
 SELECT s.nazwa AS stacja, count(*) AS liczba_startow
 FROM wypozyczenie w
 JOIN stacja s ON s.id_stacja = w.id_stacja_start
@@ -139,7 +104,7 @@ GROUP BY s.id_stacja, s.nazwa
 HAVING count(*) >= 1
 ORDER BY liczba_startow DESC, s.nazwa;
 
--- Z3: ostatnie wypożyczenie każdego roweru (podzapytanie skorelowane)
+-- ostatnie wypożyczenie kazdego roweru
 SELECT r.nr_seryjny, w.czas_start, w.id_klient
 FROM wypozyczenie w
 JOIN rower r ON r.id_rower = w.id_rower
@@ -150,7 +115,7 @@ WHERE w.czas_start = (
 )
 ORDER BY r.nr_seryjny;
 
--- Z4: ranking klientów wg przychodu (window function)
+--ranking klientow wg przychodu
 SELECT
     k.imie || ' ' || k.nazwisko AS klient,
     sum(p.kwota)                 AS przychod,
@@ -162,7 +127,7 @@ WHERE p.status = 'oplacona'
 GROUP BY k.id_klient, k.imie, k.nazwisko
 ORDER BY przychod DESC;
 
--- Z5: rowery nigdy niewypożyczone
+--rowery nigdy niewypozyczone
 SELECT r.nr_seryjny, r.status
 FROM rower r
 WHERE NOT EXISTS (
@@ -170,7 +135,7 @@ WHERE NOT EXISTS (
 )
 ORDER BY r.nr_seryjny;
 
--- Z6: średni czas wypożyczenia wg taryfy (CTE) — poprawka: ::numeric
+-- sredni czas wypozyczenia wg taryfy (CTE)
 WITH zakonczone AS (
     SELECT
         w.id_klient,
@@ -187,7 +152,3 @@ JOIN klient k ON k.id_klient = z.id_klient
 JOIN taryfa t ON t.id_taryfa = k.id_taryfa
 GROUP BY t.nazwa
 ORDER BY sredni_czas_min DESC;
-
--- ============================================================================
---  Koniec skryptu widoków i zapytań.
--- ============================================================================
