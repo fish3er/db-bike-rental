@@ -1,18 +1,5 @@
--- ============================================================================
--- System wypożyczalni rowerów miejskich
--- Skrypt 04 - Funkcje, procedury i wyzwalacze PL/pgSQL
--- System zarządzania bazą danych: PostgreSQL
---
--- Implementuje proceduralnie reguły biznesowe RB1, RB3, RB4, RB5 oraz
--- operacje atomowe (wypożyczenie, zwrot, naliczenie opłaty). Triggery
--- uzupełniają deklaratywne ograniczenia z 01_ddl.sql tam, gdzie sam CHECK
--- nie wystarcza (zależności między wieloma tabelami, kaskadowa zmiana stanu).
---
--- Uruchamiać PO 01_ddl.sql. Niezależne od 02_dane.sql – można uruchamiać
--- w dowolnej kolejności względem danych testowych.
--- ============================================================================
 
--- Czyszczenie obiektów przy ponownym uruchomieniu (kolejność: triggery → funkcje).
+-- czyszczenie obiektow przy resecie
 DROP TRIGGER IF EXISTS trg_dok_sync_status        ON dok;
 DROP TRIGGER IF EXISTS trg_blokuj_zablokowanego   ON wypozyczenie;
 DROP TRIGGER IF EXISTS trg_status_roweru          ON wypozyczenie;
@@ -26,18 +13,7 @@ DROP FUNCTION IF EXISTS oblicz_oplate(INTEGER)      CASCADE;
 DROP PROCEDURE IF EXISTS wypozycz_rower(INTEGER, INTEGER, INTEGER);
 DROP PROCEDURE IF EXISTS zwroc_rower(INTEGER, INTEGER);
 
--- ############################################################################
--- CZĘŚĆ A: WYZWALACZE (TRIGGERS)
--- ############################################################################
 
--- ----------------------------------------------------------------------------
--- Trigger 1: trg_dok_sync_status
--- Cel: automatyzuje regułę RB3 - utrzymuje spójność dok.status ↔ dok.id_rower.
--- Deklaratywny CHECK chk_dok_spojnosc w 01_ddl.sql tylko WERYFIKUJE spójność;
--- ten trigger ją WYMUSZA, ustawiając status automatycznie przy każdej
--- modyfikacji id_rower. Dzięki temu aplikacja nie musi pamiętać o jednoczesnej
--- aktualizacji obu pól.
--- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_dok_sync_status()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -58,12 +34,7 @@ CREATE TRIGGER trg_dok_sync_status
 COMMENT ON FUNCTION fn_dok_sync_status() IS
 'RB3: wymusza spójność dok.status z dok.id_rower (NULL → wolny, rower → zajety).';
 
--- ----------------------------------------------------------------------------
--- Trigger 2: trg_blokuj_zablokowanego
--- Cel: implementuje regułę RB4 - uniemożliwia wypożyczenie klientowi
--- z flagą zablokowany = TRUE. Zwraca błąd na poziomie bazy, więc ochrona
--- jest niezależna od aplikacji i działa nawet przy ręcznym INSERT.
--- ----------------------------------------------------------------------------
+
 CREATE OR REPLACE FUNCTION fn_blokuj_zablokowanego()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -93,15 +64,7 @@ CREATE TRIGGER trg_blokuj_zablokowanego
 COMMENT ON FUNCTION fn_blokuj_zablokowanego() IS
 'RB4: blokuje INSERT wypożyczenia dla klienta z zablokowany = TRUE.';
 
--- ----------------------------------------------------------------------------
--- Trigger 3: trg_status_roweru
--- Cel: utrzymuje rower.status spójny z aktualnymi wypożyczeniami (RB1).
--- - INSERT wypożyczenia (rozpoczęcie) → status 'wypozyczony'
--- - UPDATE z czas_koniec ustawionym (zwrot) → status 'dostepny'
--- Status 'serwis' jest świadomie pomijany - rower w serwisie nie powinien
--- mieć aktywnego wypożyczenia, ale jeśli się to zdarzy, status serwisowy
--- ma pierwszeństwo i nie jest nadpisywany przez ten trigger.
--- ----------------------------------------------------------------------------
+
 CREATE OR REPLACE FUNCTION fn_status_roweru()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -132,13 +95,7 @@ CREATE TRIGGER trg_status_roweru
 COMMENT ON FUNCTION fn_status_roweru() IS
 'RB1: synchronizuje rower.status ze stanem wypożyczenia (dostepny ↔ wypozyczony).';
 
--- ----------------------------------------------------------------------------
--- Trigger 4: trg_blokuj_z_zaleglosciami
--- Cel: implementuje regułę RB5 - automatycznie ustawia klient.zablokowany
--- = TRUE, gdy pojawi się płatność ze statusem 'zalegla'. Odwrotnie - gdy
--- wszystkie zaległości zostaną opłacone, blokada jest zdejmowana.
--- Reaguje na INSERT, UPDATE i DELETE w tabeli platnosc.
--- ----------------------------------------------------------------------------
+
 CREATE OR REPLACE FUNCTION fn_blokuj_z_zaleglosciami()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -173,18 +130,7 @@ CREATE TRIGGER trg_blokuj_z_zaleglosciami
 COMMENT ON FUNCTION fn_blokuj_z_zaleglosciami() IS
 'RB5: synchronizuje klient.zablokowany z istnieniem płatności o statusie zalegla.';
 
--- ############################################################################
--- CZĘŚĆ B: FUNKCJE I PROCEDURY
--- ############################################################################
 
--- ----------------------------------------------------------------------------
--- Funkcja: oblicz_oplate(p_wypozyczenie)
--- Zwraca kwotę należną za wypożyczenie zgodnie z taryfą klienta.
--- Formuła: opłata_początkowa + CEIL(minuty) * stawka_minuta
--- Dla wypożyczeń aktywnych (czas_koniec IS NULL) liczy opłatę "na teraz".
--- Oznaczona jako STABLE - czyta dane, ale nie modyfikuje stanu bazy
--- (optymalizator może cache'ować wynik w obrębie jednego zapytania).
--- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION oblicz_oplate(p_wypozyczenie INTEGER)
 RETURNS NUMERIC(8,2) AS $$
 DECLARE
@@ -213,18 +159,7 @@ $$ LANGUAGE plpgsql STABLE;
 COMMENT ON FUNCTION oblicz_oplate(INTEGER) IS
 'Oblicza opłatę za wypożyczenie wg taryfy klienta: opłata startowa + minuty * stawka.';
 
--- ----------------------------------------------------------------------------
--- Procedura: wypozycz_rower(p_klient, p_rower, p_stacja)
--- Atomowa operacja rozpoczęcia wypożyczenia:
---   1. SELECT FOR UPDATE na rowerze (blokada pessymistyczna - zapobiega
---      wyścigowi dwóch klientów próbujących wypożyczyć ten sam rower).
---   2. Weryfikacja dostępności (status = 'dostepny').
---   3. INSERT do tabeli wypozyczenie - tu odpalają się triggery RB4 i RB1.
---   4. Zwolnienie doku, w którym rower stał (trigger trg_dok_sync_status
---      automatycznie ustawi dok.status = 'wolny').
--- Procedura wykonuje się w pojedynczej transakcji niejawnej; błąd w dowolnym
--- kroku powoduje rollback całości.
--- ----------------------------------------------------------------------------
+
 CREATE OR REPLACE PROCEDURE wypozycz_rower(
     p_klient INTEGER,
     p_rower  INTEGER,
@@ -234,7 +169,7 @@ LANGUAGE plpgsql AS $$
 DECLARE
     v_status TEXT;
 BEGIN
-    -- Pessymistyczna blokada na wierszu roweru.
+    -- Pesymistyczna blokada na wierszu roweru.
     SELECT status
       INTO v_status
       FROM rower
@@ -264,18 +199,7 @@ $$;
 COMMENT ON PROCEDURE wypozycz_rower(INTEGER, INTEGER, INTEGER) IS
 'Atomowe rozpoczęcie wypożyczenia: walidacja + INSERT + zwolnienie doku.';
 
--- ----------------------------------------------------------------------------
--- Procedura: zwroc_rower(p_wypozyczenie, p_stacja_zwrotu)
--- Atomowa operacja zwrotu:
---   1. SELECT FOR UPDATE na wypożyczeniu (blokada przed równoległym zwrotem).
---   2. Zamknięcie wypożyczenia (czas_koniec, id_stacja_koniec)
---      → trigger trg_status_roweru przywraca rower do statusu 'dostepny'.
---   3. Próba zadokowania roweru w pierwszym wolnym doku stacji zwrotu.
---      Jeśli brak wolnego doku - WARNING (rower zostaje "luzem", obsługa
---      stacji musi go ręcznie zadokować). Wypożyczenie i tak jest zamknięte.
---   4. Naliczenie opłaty przez oblicz_oplate(); płatność ze statusem 'zalegla'
---      → trigger trg_blokuj_z_zaleglosciami zablokuje klienta (RB5).
--- ----------------------------------------------------------------------------
+
 CREATE OR REPLACE PROCEDURE zwroc_rower(
     p_wypozyczenie  INTEGER,
     p_stacja_zwrotu INTEGER
@@ -334,11 +258,8 @@ $$;
 COMMENT ON PROCEDURE zwroc_rower(INTEGER, INTEGER) IS
 'Atomowy zwrot roweru: zamknięcie wypożyczenia + dokowanie + naliczenie opłaty.';
 
--- ============================================================================
--- TESTY MANUALNE
--- Odkomentować po załadowaniu 02_dane.sql w celu weryfikacji.
--- ============================================================================
 
+-- Testy manualne
 -- -- Test 1: poprawne wypożyczenie (klient 1, rower dostępny, stacja 1)
 -- CALL wypozycz_rower(1, 1, 1);
 -- SELECT id_wypozyczenie, id_klient, id_rower, czas_start FROM wypozyczenie
@@ -369,7 +290,3 @@ COMMENT ON PROCEDURE zwroc_rower(INTEGER, INTEGER) IS
 --   WHERE id_klient = 1 AND status = 'zalegla';
 -- SELECT id_klient, zablokowany FROM klient WHERE id_klient = 1;
 -- -- Powinno: zablokowany = FALSE (o ile nie ma innych zaległości)
-
--- ============================================================================
--- Koniec skryptu funkcji, procedur i wyzwalaczy.
--- ============================================================================
